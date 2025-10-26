@@ -2,5 +2,6 @@ discord.py
 aiohttp
 python-dotenv
 azure-ai-inference
-flask
+Flask
 azure-core
+
