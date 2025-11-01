@@ -30,6 +30,8 @@ intents.messages = True
 intents.message_content = True
 intents.members = True # REQUIRED for game mentions
 
+
+SHORT_TERM_MEMORY_LIMIT=16
 # --- NEW: Use commands.Bot instead of discord.Client ---
 # We give it a prefix it will never use, since we're all slash.
 bot = commands.Bot(command_prefix="!_THIS_IS_DISABLED", intents=intents)
@@ -497,3 +499,4 @@ if __name__ == "__main__":
         print("Starting Gymbrootan bot...")
         keep_alive()
         bot.run(DISCORD_TOKEN)
+
