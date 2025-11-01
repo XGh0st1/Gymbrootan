@@ -4,4 +4,5 @@ python-dotenv
 azure-ai-inference
 Flask
 azure-core
+openai
 
