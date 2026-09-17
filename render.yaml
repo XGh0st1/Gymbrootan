@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: gymbrootan
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /health
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPO
+        value: "XGh0st1/Gymbrootan"
+      - key: GITHUB_BRANCH
+        value: "main"
+      - key: COMMAND_PREFIX
+        value: "!"

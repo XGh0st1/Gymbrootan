@@ -11,6 +11,11 @@ from PIL import Image, ImageDraw, ImageFont
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import DB_PATH
 
+# Path to the bundled font relative to this file
+FONT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Poppins-Bold.ttf")
+# Path to bundled template background — committed to repo inside assetss/
+DEFAULT_BG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assetss", "templatewelcome.png")
+
 def create_welcome_image(bg_path, avatar_bytes, x, y, size, username, u_x, u_y, u_size, u_angle):
     try:
         # Load background
@@ -37,14 +42,12 @@ def create_welcome_image(bg_path, avatar_bytes, x, y, size, username, u_x, u_y, 
         final_image.paste(avatar, (top_left_x, top_left_y), mask)
         
         # Draw Username Text
-        def get_font(size):
+        def get_font(fsize):
             try:
-                # Try to load the custom font
-                font_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Poppins-Bold.ttf")
-                return ImageFont.truetype(font_path, size)
+                return ImageFont.truetype(FONT_PATH, fsize)
             except:
                 try:
-                    return ImageFont.truetype("arialbd.ttf", size)
+                    return ImageFont.truetype("arialbd.ttf", fsize)
                 except:
                     return ImageFont.load_default()
 
@@ -56,7 +59,6 @@ def create_welcome_image(bg_path, avatar_bytes, x, y, size, username, u_x, u_y, 
             text_h = bbox[3] - bbox[1]
             offset_x, offset_y = bbox[0], bbox[1]
         else:
-            # Fallback for old pillow
             text_w, text_h = font.getsize(username)
             offset_x, offset_y = 0, 0
             
@@ -120,35 +122,47 @@ class Welcome(commands.Cog):
                 content_text = f"{member.mention} welcome to **{member.guild.name}**! 🎉"
                 
                 file = None
-                config_path = "welcome_config.json"
-                if os.path.exists(config_path):
-                    try:
-                        with open(config_path, "r") as f:
-                            config = json.load(f)
-                            
-                        bg_path = config.get("background_image")
-                        if bg_path and os.path.exists(bg_path):
-                            # Download avatar
-                            avatar_bytes = await member.display_avatar.read()
-                            x = config.get("avatar_x", 100)
-                            y = config.get("avatar_y", 100)
-                            size = config.get("avatar_size", 128)
-                            
-                            # Generate image
-                            image_buffer = await asyncio.to_thread(
-                                create_welcome_image, bg_path, avatar_bytes, x, y, size,
-                                member.display_name,
-                                config.get("username_x", 200),
-                                config.get("username_y", 200),
-                                config.get("username_size", 40),
-                                config.get("username_angle", 0)
-                            )
-                            
-                            if image_buffer:
-                                file = discord.File(fp=image_buffer, filename="welcome.png")
-                        
-                    except Exception as e:
-                        print(f"Error handling custom welcome image: {e}")
+                try:
+                    # Load config from DB
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        async with db.execute(
+                            "SELECT config_json FROM welcome_image_config WHERE guild_id = ?",
+                            (member.guild.id,)
+                        ) as cursor:
+                            cfg_row = await cursor.fetchone()
+
+                    if cfg_row and cfg_row[0]:
+                        config = json.loads(cfg_row[0])
+                    else:
+                        # Fall back to default bundled template
+                        config = {
+                            "background_image": DEFAULT_BG_PATH,
+                            "avatar_x": 527, "avatar_y": 265, "avatar_size": 170,
+                            "username_x": 527, "username_y": 390, "username_size": 46, "username_angle": 0
+                        }
+
+                    bg_path = config.get("background_image", DEFAULT_BG_PATH)
+                    if not os.path.exists(bg_path):
+                        bg_path = DEFAULT_BG_PATH
+
+                    if os.path.exists(bg_path):
+                        avatar_bytes = await member.display_avatar.read()
+                        image_buffer = await asyncio.to_thread(
+                            create_welcome_image,
+                            bg_path, avatar_bytes,
+                            config.get("avatar_x", 527),
+                            config.get("avatar_y", 265),
+                            config.get("avatar_size", 170),
+                            member.display_name,
+                            config.get("username_x", 527),
+                            config.get("username_y", 390),
+                            config.get("username_size", 46),
+                            config.get("username_angle", 0)
+                        )
+                        if image_buffer:
+                            file = discord.File(fp=image_buffer, filename="welcome.png")
+                except Exception as e:
+                    print(f"Error handling custom welcome image: {e}")
                 
                 if file:
                     await channel.send(content=content_text, file=file)
@@ -206,6 +220,37 @@ class Welcome(commands.Cog):
             await db.commit()
         embed = discord.Embed(description=f"# ✅ Success\n```diff\n+ Goodbye channel set to #{channel.name}\n```", color=discord.Color.brand_green())
         await ctx.send(embed=embed)
+
+    @commands.hybrid_command(description="Save current welcome_config.json settings to the database (run this after editing in the editor)")
+    @commands.has_permissions(manage_guild=True)
+    async def savewelcomeconfig(self, ctx: commands.Context):
+        config_path = "welcome_config.json"
+        if not os.path.exists(config_path):
+            await ctx.send("No `welcome_config.json` found. Run the editor first.", ephemeral=True)
+            return
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+
+            # Replace local Windows path with repo-relative assetss/templatewelcome.png
+            bg = config.get("background_image", "")
+            if not os.path.exists(bg):
+                config["background_image"] = DEFAULT_BG_PATH
+
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute(
+                    "INSERT INTO welcome_image_config (guild_id, config_json) VALUES (?, ?) "
+                    "ON CONFLICT(guild_id) DO UPDATE SET config_json = excluded.config_json",
+                    (ctx.guild.id, json.dumps(config))
+                )
+                await db.commit()
+            embed = discord.Embed(
+                description="# ✅ Welcome Config Saved\n```diff\n+ Settings saved to database. They will persist on Render!\n```",
+                color=discord.Color.brand_green()
+            )
+            await ctx.send(embed=embed)
+        except Exception as e:
+            await ctx.send(f"Error saving config: {e}", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Welcome(bot))

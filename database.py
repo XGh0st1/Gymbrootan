@@ -93,6 +93,14 @@ async def init_db():
             )
             """
         )
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS welcome_image_config (
+                guild_id INTEGER PRIMARY KEY,
+                config_json TEXT
+            )
+            """
+        )
         # Upgrade path: if an older bot.db already exists without this column, add it.
         try:
             await db.execute("ALTER TABLE guild_config ADD COLUMN birthday_channel_id INTEGER")

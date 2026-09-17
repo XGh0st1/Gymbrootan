@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from database import init_db
 from keep_alive import start_web_server
+import git_sync
 
 load_dotenv()
 
@@ -35,6 +36,7 @@ EXTENSIONS = (
     "cogs.trivia",
     "cogs.gaming",
     "cogs.ai_chat",
+    "cogs.git_sync_cog",
 )
 
 
@@ -45,6 +47,19 @@ class MyBot(commands.Bot):
     async def setup_hook(self):
         self.loop.create_task(start_web_server())
         await init_db()
+
+        # On Render: use GitHub API to restore latest memory + data, then import to DB
+        if os.environ.get("GITHUB_TOKEN"):
+            logger.info("[GitSync] Pulling latest data from GitHub API...")
+            try:
+                await git_sync.pull_all()
+                await git_sync.import_json_to_db()
+                logger.info("[GitSync] DB restored from GitHub backups ✓")
+            except Exception as e:
+                logger.warning(f"[GitSync] pull failed: {e} — starting fresh")
+        else:
+            logger.info("[GitSync] No GITHUB_TOKEN set — skipping sync (local mode)")
+
         for ext in EXTENSIONS:
             try:
                 await self.load_extension(ext)
