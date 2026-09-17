@@ -20,23 +20,21 @@ def create_welcome_image(bg_path, avatar_bytes, x, y, size, username, u_x, u_y, 
         avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
         avatar = avatar.resize((size, size), Image.LANCZOS)
         
-        # Create circular mask
-        mask = Image.new("L", (size, size), 0)
+        # Create anti-aliased circular mask
+        mask = Image.new("L", (size * 4, size * 4), 0)
         draw = ImageDraw.Draw(mask)
-        draw.ellipse((0, 0, size, size), fill=255)
+        draw.ellipse((0, 0, size * 4, size * 4), fill=255)
+        mask = mask.resize((size, size), Image.LANCZOS)
         
         # Calculate top-left corner since x,y is center in our editor
         top_left_x = int(x - size // 2)
         top_left_y = int(y - size // 2)
         
-        # Create a new transparent image the same size as the background
-        final_image = Image.new("RGBA", bg.size, (0, 0, 0, 0))
+        # Start with the background template
+        final_image = bg.copy()
         
-        # Paste avatar onto the final image using mask
+        # Paste avatar OVER the background using mask
         final_image.paste(avatar, (top_left_x, top_left_y), mask)
-        
-        # Paste the background template OVER the avatar
-        final_image.paste(bg, (0, 0), bg)
         
         # Draw Username Text
         def get_font(size):
@@ -123,7 +121,7 @@ class Welcome(commands.Cog):
                 
                 file = None
                 config_path = "welcome_config.json"
-                if os.path.exists(config_path) and member.avatar:
+                if os.path.exists(config_path):
                     try:
                         with open(config_path, "r") as f:
                             config = json.load(f)
@@ -131,7 +129,7 @@ class Welcome(commands.Cog):
                         bg_path = config.get("background_image")
                         if bg_path and os.path.exists(bg_path):
                             # Download avatar
-                            avatar_bytes = await member.avatar.read()
+                            avatar_bytes = await member.display_avatar.read()
                             x = config.get("avatar_x", 100)
                             y = config.get("avatar_y", 100)
                             size = config.get("avatar_size", 128)

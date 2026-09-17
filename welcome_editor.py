@@ -175,7 +175,7 @@ class WelcomeEditor:
             if target == "avatar":
                 self.avatar_size = max(20, self.avatar_size + delta)
             elif target == "username":
-                size_delta = 2 if event.delta > 0 else -2
+                size_delta = 10 if event.delta > 0 else -10
                 self.username_size = max(10, self.username_size + size_delta)
                 
         self.draw_canvas()
