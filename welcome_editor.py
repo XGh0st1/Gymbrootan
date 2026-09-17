@@ -115,12 +115,14 @@ class WelcomeEditor:
                 bbox = font.getbbox(text)
                 text_w = bbox[2] - bbox[0]
                 text_h = bbox[3] - bbox[1]
+                offset_x, offset_y = bbox[0], bbox[1]
             else:
                 text_w, text_h = font.getsize(text)
+                offset_x, offset_y = 0, 0
                 
-            txt_img = Image.new('RGBA', (text_w + 20, text_h + 20), (255, 255, 255, 0))
+            txt_img = Image.new('RGBA', (text_w + 40, text_h + 40), (255, 255, 255, 0))
             txt_draw = ImageDraw.Draw(txt_img)
-            txt_draw.text((10, 10), text, font=font, fill=(255, 255, 255, 255))
+            txt_draw.text((20 - offset_x, 20 - offset_y), text, font=font, fill=(255, 255, 255, 255))
             
             if self.username_angle != 0:
                 # CCW rotation to match PIL

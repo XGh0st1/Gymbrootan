@@ -39,28 +39,51 @@ def create_welcome_image(bg_path, avatar_bytes, x, y, size, username, u_x, u_y, 
         final_image.paste(bg, (0, 0), bg)
         
         # Draw Username Text
-        try:
-            # Try to load the custom font
-            font_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Poppins-Bold.ttf")
-            font = ImageFont.truetype(font_path, u_size)
-        except:
+        def get_font(size):
             try:
-                font = ImageFont.truetype("arialbd.ttf", u_size)
+                # Try to load the custom font
+                font_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Poppins-Bold.ttf")
+                return ImageFont.truetype(font_path, size)
             except:
-                font = ImageFont.load_default()
+                try:
+                    return ImageFont.truetype("arialbd.ttf", size)
+                except:
+                    return ImageFont.load_default()
+
+        font = get_font(u_size)
         
         if hasattr(font, 'getbbox'):
             bbox = font.getbbox(username)
             text_w = bbox[2] - bbox[0]
             text_h = bbox[3] - bbox[1]
+            offset_x, offset_y = bbox[0], bbox[1]
         else:
             # Fallback for old pillow
             text_w, text_h = font.getsize(username)
+            offset_x, offset_y = 0, 0
             
-        # Add padding so text doesn't cut off when rotating
-        txt_img = Image.new('RGBA', (text_w + 20, text_h + 20), (255, 255, 255, 0))
+        # Shrink to fit logic if username is very long
+        max_text_width = min(u_x, bg.width - u_x) * 2 - 40
+        if max_text_width < 50: max_text_width = bg.width - 40
+        
+        if text_w > max_text_width:
+            scale = max_text_width / text_w
+            new_u_size = max(10, int(u_size * scale))
+            font = get_font(new_u_size)
+            
+            if hasattr(font, 'getbbox'):
+                bbox = font.getbbox(username)
+                text_w = bbox[2] - bbox[0]
+                text_h = bbox[3] - bbox[1]
+                offset_x, offset_y = bbox[0], bbox[1]
+            else:
+                text_w, text_h = font.getsize(username)
+                offset_x, offset_y = 0, 0
+            
+        # Add padding so text doesn't cut off when rotating or from font descenders
+        txt_img = Image.new('RGBA', (text_w + 40, text_h + 40), (255, 255, 255, 0))
         txt_draw = ImageDraw.Draw(txt_img)
-        txt_draw.text((10, 10), username, font=font, fill=(255, 255, 255, 255))
+        txt_draw.text((20 - offset_x, 20 - offset_y), username, font=font, fill=(255, 255, 255, 255))
         
         # Rotate text image (negative angle for standard CCW rotation)
         if u_angle != 0:
