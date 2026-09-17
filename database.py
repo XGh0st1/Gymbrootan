@@ -84,6 +84,15 @@ async def init_db():
             )
             """
         )
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_channels (
+                guild_id INTEGER,
+                channel_id INTEGER,
+                PRIMARY KEY (guild_id, channel_id)
+            )
+            """
+        )
         # Upgrade path: if an older bot.db already exists without this column, add it.
         try:
             await db.execute("ALTER TABLE guild_config ADD COLUMN birthday_channel_id INTEGER")
