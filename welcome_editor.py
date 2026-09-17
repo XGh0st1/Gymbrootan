@@ -34,7 +34,7 @@ class WelcomeEditor:
         save_btn = tk.Button(control_frame, text="Save Configuration", command=self.save_config)
         save_btn.pack(side=tk.LEFT, padx=5)
         
-        help_label = tk.Label(control_frame, text="Drag to move. Scroll near item to resize. Shift+Scroll near text to rotate.")
+        help_label = tk.Label(control_frame, text="Drag to move. Scroll to resize. Shift+Scroll to rotate (1°). Ctrl+Shift+Scroll for 0.5°")
         help_label.pack(side=tk.RIGHT, padx=5)
         
         self.canvas = tk.Canvas(root, width=800, height=600, bg='gray')
@@ -168,9 +168,11 @@ class WelcomeEditor:
         
         delta = 10 if event.delta > 0 else -10
         shift_pressed = (event.state & 0x0001) != 0
+        ctrl_pressed = (event.state & 0x0004) != 0
         
         if shift_pressed and target == "username":
-            self.username_angle = (self.username_angle + (5 if event.delta > 0 else -5)) % 360
+            rot_delta = 0.5 if ctrl_pressed else 1
+            self.username_angle = (self.username_angle + (rot_delta if event.delta > 0 else -rot_delta)) % 360
         else:
             if target == "avatar":
                 self.avatar_size = max(20, self.avatar_size + delta)
