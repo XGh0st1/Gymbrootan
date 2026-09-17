@@ -40,11 +40,12 @@ def create_welcome_image(bg_path, avatar_bytes, x, y, size, username, u_x, u_y, 
         
         # Draw Username Text
         try:
-            # Try to load a standard bold font
-            font = ImageFont.truetype("arialbd.ttf", u_size)
+            # Try to load the custom font
+            font_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Poppins-Bold.ttf")
+            font = ImageFont.truetype(font_path, u_size)
         except:
             try:
-                font = ImageFont.truetype("arial.ttf", u_size)
+                font = ImageFont.truetype("arialbd.ttf", u_size)
             except:
                 font = ImageFont.load_default()
         

@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 import json
 import os
 
@@ -101,15 +101,33 @@ class WelcomeEditor:
             self.canvas.create_oval(x0, y0, x1, y1, outline="red", width=3, dash=(4, 4), tags="avatar")
             self.canvas.create_text(self.avatar_x, self.avatar_y, text="Avatar", fill="red", font=("Arial", 16, "bold"), tags="avatar")
             
-            # Draw dummy username text
-            self.canvas.create_text(
-                self.username_x, self.username_y, 
-                text="Username123", 
-                fill="white", 
-                font=("Arial", self.username_size, "bold"), 
-                angle=self.username_angle,
-                tags="username"
-            )
+            # Draw dummy username text using PIL for accurate font and rotation
+            try:
+                font = ImageFont.truetype("Poppins-Bold.ttf", self.username_size)
+            except:
+                try:
+                    font = ImageFont.truetype("arialbd.ttf", self.username_size)
+                except:
+                    font = ImageFont.load_default()
+                    
+            text = "Username123"
+            if hasattr(font, 'getbbox'):
+                bbox = font.getbbox(text)
+                text_w = bbox[2] - bbox[0]
+                text_h = bbox[3] - bbox[1]
+            else:
+                text_w, text_h = font.getsize(text)
+                
+            txt_img = Image.new('RGBA', (text_w + 20, text_h + 20), (255, 255, 255, 0))
+            txt_draw = ImageDraw.Draw(txt_img)
+            txt_draw.text((10, 10), text, font=font, fill=(255, 255, 255, 255))
+            
+            if self.username_angle != 0:
+                # CCW rotation to match PIL
+                txt_img = txt_img.rotate(-self.username_angle, expand=True, resample=Image.BICUBIC)
+                
+            self.text_photo = ImageTk.PhotoImage(txt_img)
+            self.canvas.create_image(self.username_x, self.username_y, image=self.text_photo, tags="username")
 
     def on_press(self, event):
         if not self.bg_image: return
