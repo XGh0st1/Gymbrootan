@@ -117,7 +117,7 @@ class Welcome(commands.Cog):
         if row and row[0]:
             channel = member.guild.get_channel(row[0])
             if channel:
-                content_text = f"Hey {member.mention}, welcome to **{member.guild.name}**! 🎉"
+                content_text = f"{member.mention} welcome to **{member.guild.name}**! 🎉"
                 
                 file = None
                 config_path = "welcome_config.json"
@@ -151,7 +151,7 @@ class Welcome(commands.Cog):
                         print(f"Error handling custom welcome image: {e}")
                 
                 if file:
-                    await channel.send(file=file)
+                    await channel.send(content=content_text, file=file)
                 else:
                     await channel.send(content=content_text)
 
