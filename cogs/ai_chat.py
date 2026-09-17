@@ -171,19 +171,25 @@ class AIChat(commands.Cog):
             self.chat_sessions[channel_id] = self.model.start_chat(history=[])
         return self.chat_sessions[channel_id]
 
-    async def generate_response(self, channel_id, prompt_parts):
+    async def generate_response(self, channel_id, text_prompt: str, image_parts: list = None):
         """Send a message to Gemini and return the response text."""
         if self.model is None:
             return "bro I literally have no brain right now (GEMINI_API_KEY missing)"
         chat = self.get_chat_session(channel_id)
         try:
-            response = await asyncio.to_thread(chat.send_message, prompt_parts)
+            if image_parts:
+                # Multimodal: list of image dicts + the text
+                content = image_parts + [text_prompt]
+                response = await asyncio.to_thread(chat.send_message, content)
+            else:
+                # Text-only: just pass the string directly
+                response = await asyncio.to_thread(chat.send_message, text_prompt)
             # Keep history trimmed
             if len(chat.history) > 60:
                 chat.history = chat.history[-60:]
             return response.text.strip()
         except Exception as e:
-            print(f"[AIChat] Gemini error: {e}")
+            print(f"[AIChat] Gemini error: {type(e).__name__}: {e}")
             return None
 
     @commands.Cog.listener()
@@ -229,58 +235,49 @@ class AIChat(commands.Cog):
         async with message.channel.typing():
             try:
                 mem_context = build_memory_context(guild_id, channel_id, user_id, display_name)
-                text_content = message.clean_content.replace(f"@{self.bot.user.display_name}", "").strip()
+                text_content = message.clean_content
+                # Remove bot mention
+                if self.bot.user:
+                    text_content = text_content.replace(f'<@{self.bot.user.id}>', '').replace(f'<@!{self.bot.user.id}>', '').strip()
 
-                prompt_parts = []
+                image_parts = []
 
-                # Add memory context
-                if mem_context:
-                    prompt_parts.append(f"{mem_context}\n")
-
-                # Handle image/video attachments
-                has_media = False
+                # Handle image attachments (multimodal)
                 for attachment in message.attachments:
-                    if any(attachment.filename.lower().endswith(ext) for ext in
-                           ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.mp4', '.mov', '.webm']):
+                    ext = attachment.filename.lower()
+                    if any(ext.endswith(e) for e in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
                         try:
                             img_bytes = await attachment.read()
-                            mime = "image/png"
-                            if attachment.filename.lower().endswith('.jpg') or attachment.filename.lower().endswith('.jpeg'):
-                                mime = "image/jpeg"
-                            elif attachment.filename.lower().endswith('.gif'):
-                                mime = "image/gif"
-                            elif attachment.filename.lower().endswith('.webp'):
-                                mime = "image/webp"
-                            elif attachment.filename.lower().endswith(('.mp4', '.mov', '.webm')):
-                                mime = "video/mp4"
-                            prompt_parts.append({"mime_type": mime, "data": img_bytes})
-                            has_media = True
+                            mime = "image/jpeg" if ext.endswith(('.jpg', '.jpeg')) else \
+                                   "image/gif" if ext.endswith('.gif') else \
+                                   "image/webp" if ext.endswith('.webp') else "image/png"
+                            image_parts.append({"mime_type": mime, "data": img_bytes})
                         except Exception as e:
                             print(f"[AIChat] Failed to read attachment: {e}")
 
-                # Build the text prompt
+                # Build the final text prompt
                 if text_content:
-                    prompt_parts.append(f"{display_name} says: {text_content}")
-                elif has_media:
-                    prompt_parts.append(f"{display_name} sent this image/video. React to it naturally like a friend would in Discord.")
+                    full_prompt = f"{mem_context}\n{display_name} says: {text_content}" if mem_context else f"{display_name} says: {text_content}"
+                elif image_parts:
+                    full_prompt = f"{display_name} sent this image. React to it naturally like a friend in Discord chat."
                 else:
                     return  # Nothing to respond to
 
-                reply_text = await self.generate_response(channel_id, prompt_parts)
+                reply_text = await self.generate_response(channel_id, full_prompt, image_parts if image_parts else None)
 
                 if reply_text:
-                    # Update channel memory with bot's response
                     update_channel_memory(guild_id, channel_id, f"Gymbrootan said: \"{reply_text[:100]}\"")
-
-                    # Update last_bot_spoke time
                     ch_mem = load_channel_memory(guild_id, channel_id)
                     ch_mem["last_bot_spoke"] = time.time()
                     save_channel_memory(guild_id, channel_id, ch_mem)
-
                     await message.reply(reply_text)
+                else:
+                    # Show the user something went wrong instead of silence
+                    await message.reply("bruh my brain froze for a sec, try again 💀")
 
             except Exception as e:
                 print(f"[AIChat] on_message error: {e}")
+                await message.reply("yo something broke on my end, give me a minute")
 
     @tasks.loop(minutes=1)
     async def free_will_loop(self):
@@ -295,50 +292,83 @@ class AIChat(commands.Cog):
                 if not guild:
                     continue
 
-                for channel_id in channel_ids:
+                for channel_id in list(channel_ids):
                     ch_mem = load_channel_memory(guild_id, channel_id)
                     last_active = ch_mem.get("last_active", 0)
                     last_bot_spoke = ch_mem.get("last_bot_spoke", 0)
                     now = time.time()
 
-                    # Channel has been quiet for 20-60 mins and bot hasn't spoken in 30+ mins
                     silence = now - last_active
                     bot_silence = now - last_bot_spoke
-                    min_silence = random.randint(20, 60) * 60  # 20-60 minutes
+                    min_silence = random.randint(20, 60) * 60
 
                     if silence > min_silence and bot_silence > 1800:
                         channel = guild.get_channel(channel_id)
                         if not channel:
                             continue
 
-                        # Build a gossip/free will prompt
                         recent_events = ch_mem.get("recent_events", [])
                         inside_jokes = ch_mem.get("inside_jokes", [])
-
                         context_snippets = recent_events[-5:] + inside_jokes[-2:]
-                        context_str = ""
-                        if context_snippets:
-                            context_str = f"[Recent things that happened: {'; '.join(context_snippets)}]"
+                        context_str = f"[Recent things that happened: {'; '.join(context_snippets)}]" if context_snippets else ""
 
                         prompts = [
-                            f"{context_str}\nYou haven't talked in a while. You feel like starting something. Send a random message — gossip, ask something, share a hot take, reference something that happened, or just say whatever's on your mind. Keep it short and natural.",
-                            f"{context_str}\nYou randomly thought of something funny or interesting. Just say it unprompted. Could be a roast of someone, a random thought, a dumb question, or a gossip moment.",
-                            f"{context_str}\nYou're bored. Start some drama or say something that'll get people talking. Reference something someone said if you can.",
+                            f"{context_str}\nYou haven't talked in a while. Start something — gossip, ask something, share a hot take, or just say whatever's on your mind. Keep it short.",
+                            f"{context_str}\nYou randomly thought of something funny. Just say it unprompted. Could be a roast, random thought, dumb question, or gossip.",
+                            f"{context_str}\nYou're bored. Start some drama or say something that'll get people talking.",
                         ]
 
                         prompt = random.choice(prompts)
-
                         async with channel.typing():
                             reply = await self.generate_response(channel_id, prompt)
                             if reply:
                                 await channel.send(reply)
                                 ch_mem["last_bot_spoke"] = time.time()
                                 save_channel_memory(guild_id, channel_id, ch_mem)
-                        break  # Only one free will message per loop tick
+                        break
         except Exception as e:
             print(f"[AIChat] free_will_loop error: {e}")
 
     # ─── Slash Commands ───────────────────────────────────────────────────────
+
+    @commands.hybrid_command(description="Enable Gymbrootan AI in the current channel (or a specific channel)")
+    @commands.has_permissions(manage_guild=True)
+    async def aienable(self, ctx: commands.Context, channel: discord.TextChannel = None):
+        target = channel or ctx.channel
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO ai_channels (guild_id, channel_id) VALUES (?, ?)",
+                (ctx.guild.id, target.id)
+            )
+            await db.commit()
+        self.ai_channels.setdefault(ctx.guild.id, set()).add(target.id)
+        ch_mem = load_channel_memory(ctx.guild.id, target.id)
+        ch_mem["last_active"] = time.time()
+        ch_mem["last_bot_spoke"] = time.time()
+        save_channel_memory(ctx.guild.id, target.id, ch_mem)
+        embed = discord.Embed(
+            description=f"# 🟢 AI Enabled\n```diff\n+ Gymbrootan is now active in #{target.name}\n+ He will read, respond, and talk freely here\n```",
+            color=discord.Color.green()
+        )
+        await ctx.send(embed=embed)
+
+    @commands.hybrid_command(description="Disable Gymbrootan AI in the current channel (or a specific channel)")
+    @commands.has_permissions(manage_guild=True)
+    async def aidisable(self, ctx: commands.Context, channel: discord.TextChannel = None):
+        target = channel or ctx.channel
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "DELETE FROM ai_channels WHERE guild_id = ? AND channel_id = ?",
+                (ctx.guild.id, target.id)
+            )
+            await db.commit()
+        if ctx.guild.id in self.ai_channels:
+            self.ai_channels[ctx.guild.id].discard(target.id)
+        embed = discord.Embed(
+            description=f"# 🔴 AI Disabled\n```diff\n- Gymbrootan is now silent in #{target.name}\n- He will still respond to @mentions from any channel\n```",
+            color=discord.Color.brand_red()
+        )
+        await ctx.send(embed=embed)
 
     @commands.hybrid_command(description="Set a channel where Gymbrootan listens and talks freely")
     @commands.has_permissions(manage_guild=True)
@@ -349,15 +379,11 @@ class AIChat(commands.Cog):
                 (ctx.guild.id, channel.id)
             )
             await db.commit()
-
         self.ai_channels.setdefault(ctx.guild.id, set()).add(channel.id)
-
-        # Reset channel memory timer so free will doesn't fire immediately
         ch_mem = load_channel_memory(ctx.guild.id, channel.id)
         ch_mem["last_active"] = time.time()
         ch_mem["last_bot_spoke"] = time.time()
         save_channel_memory(ctx.guild.id, channel.id, ch_mem)
-
         embed = discord.Embed(
             description=f"# 🧠 AI Channel Set\n```diff\n+ Gymbrootan will now listen and talk freely in #{channel.name}\n```",
             color=discord.Color.purple()
