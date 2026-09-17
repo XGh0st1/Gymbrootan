@@ -34,6 +34,7 @@ EXTENSIONS = (
     "cogs.birthday",
     "cogs.trivia",
     "cogs.gaming",
+    "cogs.ai_chat",
 )
 
 
