@@ -24,9 +24,9 @@ AUTO_RESPONSE_CHANNEL_ID = os.getenv("AUTO_RESPONSE_CHANNEL_ID")
 # --- 2. AI & App Configuration ---
 AI_ENDPOINT = "https://models.github.ai/inference"
 AI_MODEL = "openai/gpt-4o"
-HISTORY_FILE = "conversation_history.json"
-GAMES_FILE = "active_games.json" 
-POSTED_GAMES_FILE = "posted_games.json" # For Epic Games
+HISTORY_FILE = "data/conversation_history.json"
+GAMES_FILE = "data/active_games.json" 
+POSTED_GAMES_FILE = "data/posted_games.json" # For Epic Games
 EPIC_GAMES_API_URL = "https://store-data.unrealengine.com/api/v1/freeGamesPromotions"
 
 # --- 3. Bot & Memory Setup ---
@@ -85,9 +85,10 @@ MIN_PLAYERS = 4
 # --- Persistence Functions (History, Games, Posted Games) ---
 
 def save_history():
-    serializable_history = {cid: list(hist) for cid, hist in conversation_history.items()}
     try:
-        with open(HISTORY_FILE, "w") as f: json.dump(serializable_history, f, indent=4)
+        os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
+        dump_data = {cid: list(hist_list) for cid, hist_list in conversation_history.items()}
+        with open(HISTORY_FILE, "w") as f: json.dump(dump_data, f, indent=4)
         print("Conversation history saved.")
     except Exception as e: print(f"Error saving history: {e}")
 
@@ -102,6 +103,7 @@ def load_history():
 
 def save_games():
     try:
+        os.makedirs(os.path.dirname(GAMES_FILE), exist_ok=True)
         with open(GAMES_FILE, "w") as f: json.dump(active_games, f, indent=4)
         print("Active games saved.")
     except Exception as e: print(f"Error saving active games: {e}")
@@ -117,6 +119,7 @@ def load_games():
 def save_posted_games():
     """Saves the set of posted game IDs to a JSON file."""
     try:
+        os.makedirs(os.path.dirname(POSTED_GAMES_FILE), exist_ok=True)
         with open(POSTED_GAMES_FILE, "w") as f:
             json.dump(list(posted_games_cache), f, indent=4)
         print("Posted games cache saved.")
@@ -298,6 +301,15 @@ async def post_game_embed(channel, game_data):
     except Exception as e:
         print(f"Error parsing end date for {title}: {e}")
 
+    price_info = "Free"
+    try:
+        price_data = game_data.get('price', {}).get('totalPrice', {})
+        original_price = price_data.get('fmtPrice', {}).get('originalPrice')
+        if original_price and original_price != "0":
+            price_info = f"~~{original_price}~~ **Free**"
+    except Exception as e:
+        print(f"Error parsing price for {title}: {e}")
+
     embed = discord.Embed(
         title=f"FREE GAME: {title}",
         description=description,
@@ -306,12 +318,15 @@ async def post_game_embed(channel, game_data):
     )
     if image_url:
         embed.set_image(url=image_url)
-    embed.add_field(name="Available Until", value=end_date_str, inline=False)
+    
+    embed.add_field(name="Price", value=price_info, inline=True)
+    embed.add_field(name="Available Until", value=end_date_str, inline=True)
+    
     embed.set_footer(text="From the Epic Games Store")
     embed.timestamp = datetime.now(timezone.utc)
     
     view = discord.ui.View()
-    view.add_item(discord.ui.Button(label=f"Claim {title}", style=discord.ButtonStyle.link, url=page_url, emoji="🎁"))
+    view.add_item(discord.ui.Button(label="Claim Now", style=discord.ButtonStyle.link, url=page_url, emoji="🎁"))
     
     try:
         await channel.send(f"Yo @everyone, new free game just dropped!", embed=embed, view=view)
