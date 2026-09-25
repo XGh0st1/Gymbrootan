@@ -106,4 +106,15 @@ async def init_db():
             await db.execute("ALTER TABLE guild_config ADD COLUMN birthday_channel_id INTEGER")
         except Exception:
             pass  # column already exists
+            
+        try:
+            await db.execute("ALTER TABLE game_events ADD COLUMN description TEXT")
+        except Exception:
+            pass
+            
+        try:
+            await db.execute("ALTER TABLE game_events ADD COLUMN image_url TEXT")
+        except Exception:
+            pass
+            
         await db.commit()

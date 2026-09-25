@@ -5,6 +5,7 @@ from discord import app_commands
 import aiosqlite
 import os
 import sys
+import dateparser
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import DB_PATH
@@ -67,59 +68,110 @@ class RecommendModal(discord.ui.Modal, title="Recommend a Game"):
 
 class EventModal(discord.ui.Modal, title="Create Game Event"):
     game_name = discord.ui.TextInput(
-        label="Game Name",
+        label="Event Title",
         placeholder="e.g. Counter-Strike 2",
         max_length=50,
     )
-    minutes = discord.ui.TextInput(
-        label="Starts in (minutes)",
-        placeholder="e.g. 30",
-        max_length=4,
+    description = discord.ui.TextInput(
+        label="Description (Optional)",
+        style=discord.TextStyle.paragraph,
+        placeholder="e.g. Looking for a full 5-stack to rank up!",
+        max_length=300,
+        required=False,
     )
-    party_link = discord.ui.TextInput(
-        label="Party Link (Optional)",
+    date_time = discord.ui.TextInput(
+        label="Date & Time",
+        placeholder="e.g. 'in 30 mins' or 'tomorrow at 5pm'",
+        max_length=50,
+    )
+    image_url = discord.ui.TextInput(
+        label="Image URL (Optional)",
         placeholder="https://...",
         required=False,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        try:
-            mins = int(self.minutes.value)
-            if mins <= 0:
-                raise ValueError
-        except ValueError:
-            await interaction.response.send_message("❌ Minutes must be a positive number.", ephemeral=True)
+        parsed_date = dateparser.parse(self.date_time.value, settings={'TIMEZONE': 'UTC', 'RETURN_AS_TIMEZONE_AWARE': True})
+        if not parsed_date:
+            await interaction.response.send_message(f"❌ I couldn't understand the time '{self.date_time.value}'. Try something like 'in 30 minutes' or 'tomorrow at 8pm'.", ephemeral=True)
             return
 
-        start_time = int(time.time() + (mins * 60))
-        party_link_val = self.party_link.value or "No link provided"
+        start_time = int(parsed_date.timestamp())
+        if start_time < int(time.time()):
+            await interaction.response.send_message("❌ You can't schedule an event in the past!", ephemeral=True)
+            return
+
+        desc_val = self.description.value or "No description provided."
+        img_val = self.image_url.value or None
         
+        guild = interaction.guild
+        vc = None
+        invite_url = ""
+        
+        await interaction.response.defer(thinking=True)
+        
+        try:
+            vc = await guild.create_voice_channel(name=f"🎮 {self.game_name.value} Party")
+            invite = await vc.create_invite(max_age=0)
+            invite_url = invite.url
+        except Exception as e:
+            print(f"Failed to create VC/invite: {e}")
+
+        scheduled_event = None
+        if vc:
+            try:
+                scheduled_event = await guild.create_scheduled_event(
+                    name=self.game_name.value,
+                    description=desc_val,
+                    start_time=parsed_date,
+                    entity_type=discord.EntityType.voice,
+                    channel=vc,
+                    privacy_level=discord.PrivacyLevel.guild_only
+                )
+            except Exception as e:
+                print(f"Failed to create Scheduled Event: {e}")
+
         embed = discord.Embed(
-            description=f"# 📅 Game Event: {self.game_name.value}\n## Created by: {interaction.user.mention}\n\n**The event starts:** <t:{start_time}:R>\n\n> Click the **Join Event** button below to be notified when it starts!",
+            title=f"📅 Game Event: {self.game_name.value}",
+            description=f"**Created by:** {interaction.user.mention}\n\n{desc_val}\n\n**Starts:** <t:{start_time}:R> (<t:{start_time}:F>)",
             color=0x5865F2
         )
+        if img_val:
+            embed.set_image(url=img_val)
+            
+        if scheduled_event:
+            embed.add_field(name="Official Discord Event", value=f"[Click here to View]({scheduled_event.url})", inline=False)
+            
+        msg = await interaction.followup.send(embed=embed, wait=True)
         
-        await interaction.response.send_message(embed=embed)
-        msg = await interaction.original_response()
+        try:
+            await interaction.user.send(f"Your event **{self.game_name.value}** has been scheduled! 🚀\nHere is your voice party link: {invite_url}\nEvent Link: {scheduled_event.url if scheduled_event else 'N/A'}")
+        except discord.HTTPException:
+            pass
         
         async with aiosqlite.connect(DB_PATH) as db:
             cursor = await db.execute(
-                "INSERT INTO game_events (guild_id, creator_id, game_name, start_time, party_link, channel_id, message_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (interaction.guild_id, interaction.user.id, self.game_name.value, start_time, party_link_val, interaction.channel_id, msg.id)
+                "INSERT INTO game_events (guild_id, creator_id, game_name, start_time, party_link, channel_id, message_id, description, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (interaction.guild_id, interaction.user.id, self.game_name.value, start_time, invite_url, interaction.channel_id, msg.id, desc_val, img_val)
             )
             event_id = cursor.lastrowid
             
-            # Automatically join the creator
             await db.execute(
                 "INSERT INTO event_participants (event_id, user_id) VALUES (?, ?)",
                 (event_id, interaction.user.id)
             )
             await db.commit()
             
-        view = EventView(event_id)
-        view.children[0].custom_id = f"join_{event_id}"
-        view.children[1].custom_id = f"leave_{event_id}"
-        await msg.edit(view=view)
+        bot_view = EventView(event_id)
+        bot_view.children[0].custom_id = f"join_{event_id}"
+        bot_view.children[1].custom_id = f"leave_{event_id}"
+        
+        if scheduled_event:
+            bot_view.add_item(discord.ui.Button(label="View Event", url=scheduled_event.url, style=discord.ButtonStyle.link))
+        if invite_url:
+            bot_view.add_item(discord.ui.Button(label="Voice Party", url=invite_url, style=discord.ButtonStyle.link))
+            
+        await msg.edit(view=bot_view)
 
 
 class Gaming(commands.Cog):
@@ -144,13 +196,20 @@ class Gaming(commands.Cog):
         current_time = time.time()
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT id, guild_id, game_name, party_link, channel_id FROM game_events WHERE start_time <= ?",
+                "SELECT id, guild_id, game_name, channel_id, description, image_url, party_link FROM game_events WHERE start_time <= ?",
                 (current_time,)
             ) as cursor:
                 events = await cursor.fetchall()
 
             for event in events:
-                event_id, guild_id, game_name, party_link, channel_id = event
+                try:
+                    event_id, guild_id, game_name, channel_id, description, image_url, party_link = event
+                except ValueError:
+                    # fallback
+                    event_id, guild_id, game_name, channel_id = event[:4]
+                    description = "Event Starting NOW!"
+                    image_url = None
+                    party_link = None
                 
                 # Fetch participants
                 async with db.execute("SELECT user_id FROM event_participants WHERE event_id = ?", (event_id,)) as p_cursor:
@@ -160,14 +219,25 @@ class Gaming(commands.Cog):
                 
                 guild = self.bot.get_guild(guild_id)
                 if guild:
-                    channel = guild.get_channel(channel_id)
+                    # Determine announcement channel
+                    announce_channel = discord.utils.get(guild.text_channels, name="announcements")
+                    channel = announce_channel or guild.get_channel(channel_id)
+                    
                     if channel:
                         embed = discord.Embed(
-                            description=f"# 🚀 Event Starting NOW!\n## Game: {game_name}\n\n**Party Link:**\n```yaml\n{party_link}\n```",
+                            title=f"🚀 Event Starting NOW: {game_name}",
+                            description=description,
                             color=discord.Color.brand_green()
                         )
+                        if image_url:
+                            embed.set_image(url=image_url)
+                        
+                        view = discord.ui.View()
+                        if party_link:
+                            view.add_item(discord.ui.Button(label="Join Voice Party", url=party_link, style=discord.ButtonStyle.link))
+                            
                         try:
-                            await channel.send(content=f"Attention {mentions}!", embed=embed)
+                            await channel.send(content=f"Attention {mentions}!", embed=embed, view=view)
                         except discord.HTTPException:
                             pass
                 
